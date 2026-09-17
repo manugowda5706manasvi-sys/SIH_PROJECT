@@ -163,6 +163,78 @@ flowchart TD
 8. **Human review:** Low-confidence or potentially non-compliant cases are reviewed by an authorized reviewer.
 9. **Storage and reporting:** Results, declarations, evaluations, and review actions are stored and can be exported as reports.
 
+## Deployment: Render + Vercel
+
+The repository includes `render.yaml`, `backend/Dockerfile`, `frontend/vercel.json`, and `frontend/.env.example`.
+
+### 1. Push the repository to GitHub
+
+From the repository root:
+
+```powershell
+git add .
+git commit -m "Prepare deployment"
+git push origin main
+```
+
+Do not commit `.env` files, database files, uploads, or generated reports.
+
+### 2. Create the backend on Render
+
+1. Open Render and select **New > Blueprint**.
+2. Select the GitHub repository and the branch containing `render.yaml`.
+3. Create a Render PostgreSQL database. Copy its **internal database URL** into the backend service's `DATABASE_URL` environment variable.
+4. Set `SMARTLM_SECRET_KEY` to a long random value. PowerShell can generate one with:
+
+```powershell
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+5. Temporarily set `SMARTLM_CORS_ORIGINS` to the future Vercel URL, for example `https://smart-lm.vercel.app`.
+6. Keep `SMARTLM_ENABLE_VLM=0` for the first deployment. PaddleOCR-VL needs substantially more memory and is optional.
+7. Deploy and test `https://YOUR-RENDER-SERVICE.onrender.com/api/health`.
+
+The Docker image installs Tesseract, OpenCV runtime libraries, and the Python dependencies. Render supplies the `PORT` value to Uvicorn.
+
+### 3. Handle persistent files
+
+Render's normal filesystem is ephemeral. The PostgreSQL database persists structured records, but uploaded images and generated PDF/DOCX files can disappear after a restart or redeploy.
+
+For a demo, this is acceptable. For production, add a Render persistent disk and mount it at `/var/data`, or replace local file storage with S3-compatible object storage. Set:
+
+```text
+SMARTLM_UPLOAD_DIR=/var/data/uploads
+SMARTLM_REPORTS_DIR=/var/data/reports
+```
+
+The application already reads both paths from environment variables.
+
+### 4. Deploy the frontend on Vercel
+
+1. In Vercel, select **Add New > Project** and import the same repository.
+2. Set **Root Directory** to `frontend`.
+3. Leave the framework as **Vite**. Build command: `npm run build`. Output directory: `dist`.
+4. Add this environment variable:
+
+```text
+VITE_API_URL=https://YOUR-RENDER-SERVICE.onrender.com
+```
+
+5. Deploy. `frontend/vercel.json` rewrites client-side routes to `index.html`, so paths such as `/dashboard` work after refresh.
+6. Copy the deployed Vercel URL into Render's `SMARTLM_CORS_ORIGINS`, redeploy the backend, and test login plus image upload.
+
+Do not add a trailing slash to `VITE_API_URL` or the origin list.
+
+### 5. First production checks
+
+1. Open the Vercel URL and log in with the seeded admin account once.
+2. Change away from the demo credentials in the application and create inspector/reviewer users from the admin page.
+3. Test `/api/health`, login, an image analysis, history, and PDF/DOCX downloads.
+4. Inspect Render logs for OCR availability. Tesseract should be available; VLM can remain disabled.
+5. Confirm the browser has no CORS errors and that refreshing a non-root frontend route still works.
+
+For a stricter production setup, remove demo-user seeding after you have created an initial administrator and add a managed object-storage service for uploads and reports.
+
 ## Notes
 
 - This is a prototype system intended for local demo and validation.

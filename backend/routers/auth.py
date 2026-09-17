@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+import os
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
@@ -10,7 +11,7 @@ from database.database import get_db, User
 from pydantic import BaseModel
 
 # Security configurations
-SECRET_KEY = "super-secret-sih-prototype-key" # In production, this should be in .env
+SECRET_KEY = os.getenv("SMARTLM_SECRET_KEY", "dev-only-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 # 1 day
 

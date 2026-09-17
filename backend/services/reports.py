@@ -11,7 +11,10 @@ from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
-REPORTS_DIR = os.path.join(os.path.dirname(__file__), "..", "generated_reports")
+REPORTS_DIR = os.getenv(
+    "SMARTLM_REPORTS_DIR",
+    os.path.join(os.path.dirname(__file__), "..", "generated_reports"),
+)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
 # Status colour mapping (for PDF)

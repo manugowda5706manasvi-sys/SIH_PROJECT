@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: smart-lm-api
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    plan: free
+    envVars:
+      - key: SMARTLM_SECRET_KEY
+        sync: false
+      - key: SMARTLM_CORS_ORIGINS
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: SMARTLM_ENABLE_VLM
+        value: "0"
+      - key: SMARTLM_UPLOAD_DIR
+        value: /var/data/uploads
+      - key: SMARTLM_REPORTS_DIR
+        value: /var/data/reports

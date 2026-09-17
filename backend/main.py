@@ -74,8 +74,8 @@ def _should_run_vlm(quality_result: dict, ocr_result: dict) -> bool:
 # Directories
 # ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
-REPORTS_DIR = os.path.join(BASE_DIR, "generated_reports")
+UPLOAD_DIR = os.getenv("SMARTLM_UPLOAD_DIR", os.path.join(BASE_DIR, "uploads"))
+REPORTS_DIR = os.getenv("SMARTLM_REPORTS_DIR", os.path.join(BASE_DIR, "generated_reports"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(REPORTS_DIR, exist_ok=True)
 
@@ -91,15 +91,18 @@ app = FastAPI(
     version="1.0.0-prototype",
 )
 
-# CORS - allow frontend dev servers
+# CORS - use a comma-separated SMARTLM_CORS_ORIGINS value in production.
+cors_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "SMARTLM_CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite default
-        "http://localhost:3000",  # CRA default
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
