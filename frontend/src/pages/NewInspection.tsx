@@ -307,6 +307,9 @@ export default function NewInspection() {
       } else {
         msg += ` Message: ${String(err)}`;
       }
+      if (axios.isAxiosError(err) && (err.code === 'ECONNABORTED' || err.message.toLowerCase().includes('timeout'))) {
+        msg = 'Analysis is taking longer than expected. Clear, well-lit label images usually process faster. Please try again with a sharper image.';
+      }
       setError(msg);
       setBackendStep(-1);
       setActiveStep(2); // Revert to images step
@@ -596,6 +599,9 @@ export default function NewInspection() {
                   <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
                   Analysis in progress...
                 </h4>
+                <p className="text-xs text-slate-400 mb-5">
+                  Clear, well-lit images process faster. Difficult or low-quality images may take a little longer while the system verifies their text.
+                </p>
                 <div className="space-y-4">
                   {[
                     { key: 'quality', icon: ImageIcon, label: 'Checking Image Quality' },

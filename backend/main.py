@@ -44,6 +44,32 @@ logging.basicConfig(
 logger = logging.getLogger("smart_lm")
 _vlm_engine = PaddleOCRVLEngine()
 
+
+def _should_run_vlm(quality_result: dict, ocr_result: dict) -> bool:
+    """Run the expensive VLM layer only when OCR quality is poor or ambiguous."""
+    quality = str(quality_result.get("quality", "GOOD") or "GOOD").upper()
+    if quality in {"POOR", "DIFFICULT"}:
+        logger.info("[SMART-LM] VLM trigger: image quality is %s", quality)
+        return True
+
+    if not ocr_result.get("success", False):
+        logger.info("[SMART-LM] VLM trigger: primary OCR failed")
+        return True
+
+    text = (ocr_result.get("full_text") or "").lower()
+    if len(text.strip()) < 20:
+        logger.info("[SMART-LM] VLM trigger: OCR text is too short")
+        return True
+
+    required_signals = ["mrp", "net", "qty", "quantity", "manufact", "packed", "best before", "use by", "country", "origin"]
+    present_count = sum(1 for signal in required_signals if signal in text)
+    if present_count < 2:
+        logger.info("[SMART-LM] VLM trigger: OCR has too few declaration cues; signals found=%s", present_count)
+        return True
+
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Directories
 # ---------------------------------------------------------------------------
@@ -125,7 +151,7 @@ def ocr_health_endpoint():
 
 @app.get("/api/vlm/health")
 def vlm_health_endpoint():
-    return _vlm_engine.diagnostics()
+    return _vlm_engine.diagnostics(probe_model=False)
 
 
 # ---------------------------------------------------------------------------
@@ -179,12 +205,32 @@ async def analyze_image(
 
     # --- OCR ---
     logger.info("[%s] Running OCR (quality=%s)...", inspection_id, image_quality)
-    ocr_result = run_ocr(image_path)
+    try:
+        ocr_timeout = max(5.0, float(os.getenv("SMARTLM_OCR_TIMEOUT_SECONDS", "45")))
+    except ValueError:
+        ocr_timeout = 45.0
+    try:
+        ocr_result = await asyncio.wait_for(
+            asyncio.to_thread(run_ocr, image_path),
+            timeout=ocr_timeout,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("[%s] OCR exceeded %.1f seconds; continuing with fallback handling.", inspection_id, ocr_timeout)
+        ocr_result = {
+            "words": [],
+            "full_text": "",
+            "engine": "none",
+            "success": False,
+            "error": f"OCR timed out after {ocr_timeout:.1f} seconds.",
+            "source_image": image_path,
+        }
 
-    logger.info("[%s] Running PaddleOCR-VL extraction...", inspection_id)
     vlm_setting = os.getenv("SMARTLM_ENABLE_VLM")
-    vlm_enabled = (vlm_setting or "1").strip().lower() not in {"0", "false", "no", "off"}
+    vlm_enabled = (vlm_setting or "0").strip().lower() not in {"0", "false", "no", "off"}
+    should_run_vlm = _should_run_vlm(quality_result, ocr_result)
+
     if not vlm_enabled:
+        logger.info("[%s] VLM disabled by configuration; skipping fallback layer.", inspection_id)
         vlm_result = {
             "status": "disabled",
             "engine": "paddleocr-vl",
@@ -197,8 +243,47 @@ async def analyze_image(
             "blocks": [],
             "markdown": "",
         }
+    elif should_run_vlm:
+        logger.info("[%s] Running PaddleOCR-VL fallback for difficult/ambiguous OCR.", inspection_id)
+        try:
+            vlm_timeout = max(1.0, float(os.getenv("SMARTLM_VLM_TIMEOUT_SECONDS", "15")))
+        except ValueError:
+            vlm_timeout = 15.0
+        try:
+            vlm_result = await asyncio.wait_for(
+                asyncio.to_thread(_vlm_engine.run, image_path, None, quality_result),
+                timeout=vlm_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("[%s] PaddleOCR-VL exceeded %.1f seconds; continuing with OCR results.", inspection_id, vlm_timeout)
+            vlm_result = {
+                "status": "failed",
+                "engine": "paddleocr-vl",
+                "pipeline_version": _vlm_engine.pipeline_version,
+                "fields": {},
+                "source_image": image_path,
+                "error": f"VLM timed out after {vlm_timeout:.1f} seconds.",
+                "quality_status": "NOT_VERIFIABLE" if image_quality == "POOR" else "READABLE",
+                "quality_message": quality_result.get("message"),
+                "blocks": [],
+                "markdown": "",
+            }
+        if vlm_result.get("status") == "failed":
+            logger.warning("[%s] PaddleOCR-VL failed: %s", inspection_id, vlm_result.get("error"))
     else:
-        vlm_result = await asyncio.to_thread(_vlm_engine.run, image_path, None, quality_result)
+        logger.info("[%s] Skipping VLM: OCR quality and signals are sufficient for the normal path.", inspection_id)
+        vlm_result = {
+            "status": "skipped",
+            "engine": "paddleocr-vl",
+            "pipeline_version": _vlm_engine.pipeline_version,
+            "fields": {},
+            "source_image": image_path,
+            "error": None,
+            "quality_status": "READABLE",
+            "quality_message": quality_result.get("message"),
+            "blocks": [],
+            "markdown": "",
+        }
 
     # --- Extraction ---
     logger.info("[%s] Extracting declarations...", inspection_id)

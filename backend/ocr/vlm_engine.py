@@ -198,7 +198,7 @@ class PaddleOCRVLEngine:
             except Exception as exc:
                 result["error"] = f"{type(exc).__name__}: {exc}"
         raw_setting = os.getenv("SMARTLM_ENABLE_VLM")
-        normalized = (raw_setting or "1").strip().lower()
+        normalized = (raw_setting or "0").strip().lower()
         result.update({
             "vlm_enabled": normalized not in {"0", "false", "no", "off"},
             "configured_value": raw_setting,
@@ -270,7 +270,15 @@ class PaddleOCRVLEngine:
         command = [str(python_executable), str(worker), str(path), self.pipeline_version]
         if output_dir:
             command.append(str(output_dir))
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=900, check=False)
+        try:
+            worker_timeout = max(1.0, float(os.getenv("SMARTLM_VLM_TIMEOUT_SECONDS", "15")))
+        except ValueError:
+            worker_timeout = 15.0
+        try:
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=worker_timeout, check=False)
+        except subprocess.TimeoutExpired:
+            base["error"] = f"PaddleOCR-VL worker timed out after {worker_timeout:.1f} seconds."
+            return base
         if completed.returncode != 0:
             base["error"] = completed.stderr.strip() or completed.stdout.strip() or "PaddleOCR-VL worker failed."
             return base

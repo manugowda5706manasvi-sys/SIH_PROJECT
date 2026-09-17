@@ -348,7 +348,7 @@ def _run_tesseract(image_path: str) -> Dict[str, Any]:
             nonlocal best_words, best_full_text, best_conf, best_field_score, best_source_name
             rgb = cv2.cvtColor(variant_image, cv2.COLOR_BGR2RGB)
             pil_img = _PILImage.fromarray(rgb)
-            for config in ["--oem 3 --psm 6", "--oem 3 --psm 11", "--oem 3 --psm 12"]:
+            for config in ["--oem 3 --psm 6", "--oem 3 --psm 11"]:
                 data = _pytesseract.image_to_data(
                     pil_img,
                     output_type=_pytesseract.Output.DICT,
@@ -369,12 +369,12 @@ def _run_tesseract(image_path: str) -> Dict[str, Any]:
                     best_source_name = f'{variant_name}:{config}'
                     logger.debug('OCR variant selected: %s field_score=%s confidence=%.3f', best_source_name, field_score, candidate_conf)
 
-        for variant in candidates[:4]:
+        for variant in candidates[:2]:
             evaluate_variant(variant["image"], variant["name"])
 
-        if best_conf < 0.55 or not best_words:
+        if not best_words:
             enhanced_variants = generate_preprocessed_variants(img, force_enhanced=True)
-            for variant in enhanced_variants:
+            for variant in enhanced_variants[:2]:
                 evaluate_variant(variant["image"], variant["name"])
 
         if not best_words:

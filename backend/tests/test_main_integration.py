@@ -76,11 +76,12 @@ def _compliance():
     }
 
 
-async def _run(monkeypatch, vlm_result, quality="GOOD", enabled="1", extraction=None):
+async def _run(monkeypatch, vlm_result, quality="GOOD", enabled="1", extraction=None, ocr_result=None):
     monkeypatch.setenv("SMARTLM_ENABLE_VLM", enabled)
     monkeypatch.setattr(main, "UPLOAD_DIR", str(monkeypatch.tmpdir))
     monkeypatch.setattr(main, "load_and_preprocess", lambda path: {**_quality(quality), "_preprocessed_bgr": None})
-    monkeypatch.setattr(main, "run_ocr", lambda path: _ocr())
+    ocr_result = ocr_result or _ocr()
+    monkeypatch.setattr(main, "run_ocr", lambda path: ocr_result)
     extraction = extraction or _extraction()
     monkeypatch.setattr(main, "extract_all", lambda result: extraction)
     compliance = _compliance()
@@ -142,3 +143,23 @@ def test_poor_quality_preserves_not_verifiable_hybrid_status(monkeypatch, tmp_pa
     assert response.hybrid_extraction["mrp"].needs_review is True
     assert compliance_calls[0][2] == "POOR"
     assert response.compliance.overall_status == "NEEDS REVIEW"
+
+
+def test_good_quality_does_not_run_vlm_by_default(monkeypatch, tmp_path):
+    monkeypatch.tmpdir = tmp_path
+    vlm_result = {
+        "status": "success",
+        "engine": "paddleocr-vl",
+        "pipeline_version": "v1.5",
+        "quality_status": "READABLE",
+        "fields": {"product_name": {"value": "Visual Product"}},
+    }
+    def fake_ocr(path):
+        payload = _ocr()
+        payload["full_text"] = "mrp rs 120 net quantity 500g manufacturer acme best before 2026"
+        return payload
+
+    response, db, vlm, _ = asyncio.run(_run(monkeypatch, vlm_result, quality="GOOD", ocr_result=fake_ocr("unused")))
+    assert response.vlm.status == "skipped"
+    assert vlm.calls == 0
+    assert db.committed is True
